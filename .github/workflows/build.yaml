@@ -18,6 +18,7 @@ jobs:
     steps:
       - name: Git checkout
         uses: actions/checkout@v4
+
       - name: Guix cache
         uses: actions/cache/restore@v3
         with:
@@ -28,7 +29,7 @@ jobs:
             guix-cache-
 
       - name: Install Guix
-        uses: PromyLOPh/guix-install-action@v1.5
+        uses: PromyLOPh/guix-install-action@v1.6
         with:
           channels: |
             (cons* (channel
@@ -39,7 +40,9 @@ jobs:
                          "897c1a470da759236cc11798f4e0a5f7d4d59fbc"
                          (openpgp-fingerprint
                            "2A39 3FFF 68F4 EF7A 3D29  12AF 6F51 20A0 22FB B2D5"))))
-                    %default-channels)
+                    (list (channel
+                      (inherit (car %default-channels))
+                      (url "https://codeberg.org/guix/guix-mirror.git"))))
 
       - name: Set up Nonguix Substitutes
         run: |
@@ -51,18 +54,18 @@ jobs:
       - name: Set daemon level Substitutes
         run: |
           SUBSTITUTE_URLS="https://ci.guix.gnu.org https://bordeaux.guix.gnu.org https://substitutes.nonguix.org"
-          
+
           sudo sed -i "s|--substitute-urls='https://bordeaux.guix.gnu.org https://ci.guix.gnu.org'|--substitute-urls='$SUBSTITUTE_URLS'|g" /etc/systemd/system/guix-daemon.service
-                
+
           sudo systemctl daemon-reload
-          sudo systemctl restart guix-daemon.service    
-    
+
+          sudo systemctl restart guix-daemon.service
+
       - name: Build ISO
         run: |
-          
           # Write out the channels file so it can be included
           guix time-machine -C ./guix/base-channels.scm -- describe -f channels > ./guix/channels.scm
-          
+
           # Build the image
           image=$(guix time-machine -C ./guix/channels.scm -- system image -t iso9660 ./guix/installer.scm)
 
@@ -70,6 +73,18 @@ jobs:
           export RELEASE_TAG=$(date +"%Y%m%d%H%M")
           echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
           cp $image ./guix-installer-$RELEASE_TAG.iso
+
+          # Check if ISO is larger than 1GiB and split if needed
+          ISO_SIZE=$(stat -c %s ./guix-installer-$RELEASE_TAG.iso)
+          GiB=$((1024*1024*1024))
+          if [ $ISO_SIZE -gt $GiB ]; then
+            echo "ISO is larger than 1GiB, splitting into chunks..."
+            split -b 1G -d -a 1 ./guix-installer-$RELEASE_TAG.iso ./guix-installer-$RELEASE_TAG.iso.part
+            echo "SPLIT_ISO=true" >> $GITHUB_ENV
+          else
+            echo "SPLIT_ISO=false" >> $GITHUB_ENV
+          fi
+
       - uses: actions/cache/save@v3
         if: always()
         with:
@@ -81,6 +96,10 @@ jobs:
           echo $'This installer image was prepared with the following channel configuration:\r\n\r\n```\r\n' > release-notes.md
           cat ./guix/channels.scm >> release-notes.md
           echo $'\r\n```' >> release-notes.md
+          if [ "$SPLIT_ISO" = "true" ]; then
+            echo -e "\nNote: The ISO was split into 1GiB chunks due to its large size." >> release-notes.md
+            echo "Please download all parts and concatenate them with: cat guix-installer-*.iso.part* > guix-installer-combined.iso" >> release-notes.md
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -88,7 +107,9 @@ jobs:
           name: Guix Installer - ${{ env.RELEASE_TAG }}
           tag_name: v${{ env.RELEASE_TAG }}
           body_path: release-notes.md
-          files: guix-installer-${{ env.RELEASE_TAG }}.iso
+          files: |
+            guix-installer-${{ env.RELEASE_TAG }}.iso
+            guix-installer-${{ env.RELEASE_TAG }}.iso.part*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: SystemCrafters/guix-installer
