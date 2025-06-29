@@ -47,13 +47,13 @@ jobs:
       - name: Set up Nonguix Substitutes
         run: |
           # This is necessary to authorize the substitute server
-          wget https://substitutes.nonguix.org/signing-key.pub
+          wget https://nonguix-proxy.ditigal.xyz/signing-key.pub
           mv signing-key.pub nonguix-signing-key.pub
           sudo /var/guix/profiles/per-user/root/current-guix/bin/guix archive --authorize < nonguix-signing-key.pub
 
       - name: Set daemon level Substitutes
         run: |
-          SUBSTITUTE_URLS="https://ci.guix.gnu.org https://bordeaux.guix.gnu.org https://substitutes.nonguix.org"
+          SUBSTITUTE_URLS="https://ci.guix.gnu.org https://bordeaux.guix.gnu.org https://nonguix-proxy.ditigal.xyz"
 
           sudo sed -i "s|--substitute-urls='https://bordeaux.guix.gnu.org https://ci.guix.gnu.org'|--substitute-urls='$SUBSTITUTE_URLS'|g" /etc/systemd/system/guix-daemon.service
 
